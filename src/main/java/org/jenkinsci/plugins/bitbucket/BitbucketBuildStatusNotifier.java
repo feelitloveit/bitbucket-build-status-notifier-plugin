@@ -148,59 +148,71 @@ public class BitbucketBuildStatusNotifier extends Notifier {
 
         return state;
     }
+    
+    private BitbucketBuildStatusResource createBuildStatusResourceFromSCM(final SCM scm) throws Exception {
+                    if (scm == null) {
+                throw new Exception("Bitbucket build notifier only works with SCM");
+            }
+    
+            if (!(scm instanceof GitSCM)) {
+                throw new Exception("Bitbucket build notifier requires a git repo as SCM");
+            }
+    
+            GitSCM gitSCM = (GitSCM) scm;
+            List<RemoteConfig> repoList = gitSCM.getRepositories();
+            if (repoList.size() != 1) {
+                throw new Exception("None or multiple repos");
+            }
+    
+            URIish urIish = repoList.get(0).getURIs().get(0);
+            if (!urIish.getHost().equals("bitbucket.org")) {
+                throw new Exception("Bitbucket build notifier support only repositories hosted in bitbucket.org");
+            }
+    
+            // extract bitbucket user name and repository name from repo URI
+            String repoUrl = urIish.getPath();
+            String repoName = repoUrl.substring(
+                    repoUrl.lastIndexOf("/") + 1,
+                    repoUrl.indexOf(".git") > -1 ? repoUrl.indexOf(".git") : repoUrl.length()
+            );
+            if (repoName.isEmpty()) {
+                throw new Exception("Bitbucket build notifier could not extract the repository name from the repository URL");
+            }
+    
+            String userName = repoUrl.substring(0, repoUrl.indexOf("/" + repoName));
+            if (userName.indexOf("/") != -1) {
+                userName = userName.substring(userName.indexOf("/") + 1, userName.length());
+            }
+            if (userName.isEmpty()) {
+                throw new Exception("Bitbucket build notifier could not extract the user name from the repository URL");
+            }
+    
+            // find current revision
+            BuildData buildData = build.getAction(BuildData.class);
+            if(buildData == null || buildData.getLastBuiltRevision() == null) {
+                throw new Exception("Revision could not be found");
+            }
+    
+            String commitId = buildData.getLastBuiltRevision().getSha1String();
+            if (commitId == null) {
+                throw new Exception("Commit ID could not be found!");
+            }
+            
+            return new BitbucketBuildStatusResource(userName, repoName, commitId);
+    }
 
+    
     private BitbucketBuildStatusResource createBuildStatusResourceFromBuild(final AbstractBuild build) throws Exception {
 
         SCM scm = build.getProject().getScm();
-        if (scm == null) {
-            throw new Exception("Bitbucket build notifier only works with SCM");
+        if(scm instanceof MultiSCM){
+            for(SCM tempscm : scm) {
+                return createBuildStatusResourceFromSCM(scm);
+            }
+        }else{
+            return createBuildStatusResourceFromSCM(scm);
         }
 
-        if (!(scm instanceof GitSCM)) {
-            throw new Exception("Bitbucket build notifier requires a git repo as SCM");
-        }
-
-        GitSCM gitSCM = (GitSCM) scm;
-        List<RemoteConfig> repoList = gitSCM.getRepositories();
-        if (repoList.size() != 1) {
-            throw new Exception("None or multiple repos");
-        }
-
-        URIish urIish = repoList.get(0).getURIs().get(0);
-        if (!urIish.getHost().equals("bitbucket.org")) {
-            throw new Exception("Bitbucket build notifier support only repositories hosted in bitbucket.org");
-        }
-
-        // extract bitbucket user name and repository name from repo URI
-        String repoUrl = urIish.getPath();
-        String repoName = repoUrl.substring(
-                repoUrl.lastIndexOf("/") + 1,
-                repoUrl.indexOf(".git") > -1 ? repoUrl.indexOf(".git") : repoUrl.length()
-        );
-        if (repoName.isEmpty()) {
-            throw new Exception("Bitbucket build notifier could not extract the repository name from the repository URL");
-        }
-
-        String userName = repoUrl.substring(0, repoUrl.indexOf("/" + repoName));
-        if (userName.indexOf("/") != -1) {
-            userName = userName.substring(userName.indexOf("/") + 1, userName.length());
-        }
-        if (userName.isEmpty()) {
-            throw new Exception("Bitbucket build notifier could not extract the user name from the repository URL");
-        }
-
-        // find current revision
-        BuildData buildData = build.getAction(BuildData.class);
-        if(buildData == null || buildData.getLastBuiltRevision() == null) {
-            throw new Exception("Revision could not be found");
-        }
-
-        String commitId = buildData.getLastBuiltRevision().getSha1String();
-        if (commitId == null) {
-            throw new Exception("Commit ID could not be found!");
-        }
-
-        return new BitbucketBuildStatusResource(userName, repoName, commitId);
     }
 
     private void notifyBuildStatus(final BitbucketBuildStatusResource buildStatusResource, final BitbucketBuildStatus buildStatus) throws Exception {
